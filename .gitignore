@@ -1,0 +1,21 @@
+# Private notes and planning (kept out until after the presentation)
+.claude/
+planner.md
+assignment.md
+
+# Data, weights and cached outputs (too big for git)
+data/
+models/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
