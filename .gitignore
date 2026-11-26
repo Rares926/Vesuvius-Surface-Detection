@@ -19,3 +19,6 @@ __pycache__/
 .idea/
 Thumbs.db
 .DS_Store
+
+# nnU-Net raw / preprocessed / results folders (big, on the VM only)
+nnunet/
