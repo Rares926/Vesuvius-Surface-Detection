@@ -1,0 +1,10 @@
+# Create the env with:  conda env create -f environment.yml
+# The packages themselves are listed in requirements.txt.
+name: vesuvius
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      - -r requirements.txt
