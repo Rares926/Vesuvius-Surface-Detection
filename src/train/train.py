@@ -198,6 +198,10 @@ def _dice(prob: np.ndarray, label: np.ndarray) -> float:
 
 
 def cmd_check_split(args) -> None:
+    """Paired test. Rank 2's fold_all model saw every volume; their fold_0 model saw only its own 80 %.
+    On the same volume, fold_all - fold_0 is therefore ~0 where fold_0 trained, and positive where it didn't.
+    If our fold 0 is their fold 0: ~0 on our train volumes, clearly positive on our val volumes.
+    (Comparing fold_0's raw Dice on train vs val is too noisy: Dice varies a lot between volumes.)"""
     import torch
     from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
     from src.infer.predict_probs import predict_foreground
@@ -208,25 +212,28 @@ def cmd_check_split(args) -> None:
     picks = [("val", v) for v in rng.choice(val, args.n, replace=False)] + \
             [("train", v) for v in rng.choice(tr, args.n, replace=False)]
 
-    predictor = nnUNetPredictor(tile_step_size=0.5, use_gaussian=True, use_mirroring=False,
-                                perform_everything_on_device=True, device=torch.device("cuda"),
-                                verbose=False, verbose_preprocessing=False, allow_tqdm=False)
-    predictor.initialize_from_trained_model_folder(str(RANK2_PLANS_DIR), use_folds=(0,),
-                                                   checkpoint_name="checkpoint_final.pth")
-    scores = {"val": [], "train": []}
-    for group, vid in picks:
-        t0 = time.time()
-        d = _dice(predict_foreground(predictor, image_path(vid)).astype(np.float32), read_volume(label_path(vid)))
-        scores[group].append(d)
-        print(f"  {group:5s} {vid}: dice {d:.4f}  ({time.time() - t0:.0f} s)")
+    predictors = {}
+    for fold in (0, "all"):
+        p = nnUNetPredictor(tile_step_size=0.5, use_gaussian=True, use_mirroring=False,
+                            perform_everything_on_device=True, device=torch.device("cuda"),
+                            verbose=False, verbose_preprocessing=False, allow_tqdm=False)
+        p.initialize_from_trained_model_folder(str(RANK2_PLANS_DIR), use_folds=(fold,),
+                                               checkpoint_name="checkpoint_final.pth")
+        predictors[fold] = p
 
-    v, t = np.array(scores["val"]), np.array(scores["train"])
-    print(f"\nrank 2 fold_0 model, Dice at 0.5 (label 2 ignored), {args.n} volumes each:")
-    print(f"  our fold-0 val  : mean {v.mean():.4f}  median {np.median(v):.4f}")
-    print(f"  our fold-0 train: mean {t.mean():.4f}  median {np.median(t):.4f}")
-    print(f"  train - val     : {t.mean() - v.mean():+.4f}")
-    print("If the split matches rank 2's, the model has seen 'train' but not 'val', so train should score clearly "
-          "higher. A gap near 0 means the split does not match (their case names differ from ours).")
+    diffs = {"val": [], "train": []}
+    for group, vid in picks:
+        label = read_volume(label_path(vid))
+        d = {f: _dice(predict_foreground(p, image_path(vid)).astype(np.float32), label) for f, p in predictors.items()}
+        diffs[group].append(d["all"] - d[0])
+        print(f"  {group:5s} {vid}: fold_0 {d[0]:.4f}  fold_all {d['all']:.4f}  diff {d['all'] - d[0]:+.4f}")
+
+    print(f"\nDice at 0.5 (label 2 ignored), {args.n} volumes per group, fold_all - fold_0:")
+    for group, vals in diffs.items():
+        v = np.array(vals)
+        print(f"  our fold-0 {group:5s}: mean {v.mean():+.4f}  median {np.median(v):+.4f}  "
+              f"fold_all better in {(v > 0).sum()}/{len(v)}")
+    print("Split matches rank 2's if: val clearly positive (fold_all better on nearly all), train around 0.")
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -265,9 +272,9 @@ def main() -> None:
     p.add_argument("--limit", type=int, help="only the first N volumes (for testing)")
     p.set_defaults(func=cmd_split)
 
-    p = sub.add_parser("check-split", help="score rank 2's fold_0 model on our fold-0 val vs train volumes")
-    p.add_argument("--n", type=int, default=15, help="volumes per group")
-    p.add_argument("--seed", type=int, default=0)
+    p = sub.add_parser("check-split", help="paired test: rank 2's fold_all vs fold_0 on our fold-0 val and train")
+    p.add_argument("--n", type=int, default=25, help="volumes per group")
+    p.add_argument("--seed", type=int, default=1)
     p.set_defaults(func=cmd_check_split)
 
     p = sub.add_parser("train", help="run nnU-Net training")

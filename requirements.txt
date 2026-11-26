@@ -4,6 +4,10 @@
 
 # Deep learning: rank 2's models are nnU-Net ResEnc
 torch==2.14.1
+# torchvision is pulled in by timm (nnU-Net's network package). Pin the CUDA 12.6 build: unpinned, pip takes the
+# PyPI build for CUDA 13 and nnU-Net training stops with "PyTorch and torchvision were compiled with different
+# CUDA major versions".
+torchvision==0.29.2+cu126
 nnunetv2==2.8.1
 
 # Volumes, post-processing, scoring
