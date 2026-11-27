@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
@@ -31,6 +32,30 @@ def cached_ids(models: dict[str, float]) -> list[str]:
     return sorted(set.intersection(*sets)) if sets else []
 
 
+def process_volume(vol_id: str, models: dict[str, float], variants: list[str], no_metric: bool,
+                   topometrics_src: str | None, save_masks: bool) -> list[dict]:
+    """All variants of one volume: one row per variant. Top-level so it can run in a worker process."""
+    if not no_metric:
+        from src.evaluate.metric import score_volume
+
+    prob = load_ensemble(vol_id, models)
+    label = None if no_metric else read_volume(label_path(vol_id))
+    rows = []
+    for name in variants:
+        t0 = time.time()
+        mask = VARIANTS[name](prob)
+        row = {"id": vol_id, "variant": name, "seconds": round(time.time() - t0, 1),
+               "fg_fraction": float(mask.mean())}
+        if label is not None:
+            row.update(score_volume(mask, label, topometrics_src=topometrics_src))
+        if save_masks:
+            path = CACHE / "masks" / name / f"{vol_id}.tif"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tifffile.imwrite(path, mask.astype(np.uint8))
+        rows.append(row)
+    return rows
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--models", nargs="+", required=True, metavar="NAME=WEIGHT",
@@ -41,6 +66,8 @@ def main() -> None:
     ap.add_argument("--topometrics-src", help="path to topological-metrics-kaggle/src if not installed")
     ap.add_argument("--save-masks", action="store_true", help="write masks to data/cache/masks/<variant>/")
     ap.add_argument("--out", help="CSV path; default data/cache/results/<timestamp>.csv")
+    ap.add_argument("--workers", type=int, default=1,
+                    help="volumes processed in parallel (the metric takes ~48 s per volume on one CPU core)")
     args = ap.parse_args()
 
     models = {k: float(v) for k, v in (s.split("=", 1) for s in args.models)}
@@ -48,31 +75,25 @@ def main() -> None:
     if not ids:
         raise SystemExit(f"No cached probability maps for {list(models)} in {PROBS}. Run src.infer.predict_probs.")
 
-    if not args.no_metric:
-        from src.evaluate.metric import score_volume
-
     out_csv = Path(args.out) if args.out else CACHE / "results" / f"{datetime.now():%Y%m%d_%H%M%S}.csv"
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    job = dict(models=models, variants=args.variants, no_metric=args.no_metric,
+               topometrics_src=args.topometrics_src, save_masks=args.save_masks)
     rows = []
-    for vol_id in ids:
-        prob = load_ensemble(vol_id, models)
-        label = None if args.no_metric else read_volume(label_path(vol_id))
-        for name in args.variants:
-            t0 = time.time()
-            mask = VARIANTS[name](prob)
-            row = {"id": vol_id, "variant": name, "seconds": round(time.time() - t0, 1),
-                   "fg_fraction": float(mask.mean())}
-            if label is not None:
-                row.update(score_volume(mask, label, topometrics_src=args.topometrics_src))
-            if args.save_masks:
-                path = CACHE / "masks" / name / f"{vol_id}.tif"
-                path.parent.mkdir(parents=True, exist_ok=True)
-                tifffile.imwrite(path, mask.astype(np.uint8))
-            rows.append(row)
-            print({k: (round(v, 4) if isinstance(v, float) else v) for k, v in row.items()})
 
-        df = pd.DataFrame(rows)  # rewrite after every volume so a crash keeps partial results
-        out_csv.parent.mkdir(parents=True, exist_ok=True)
-        df.to_csv(out_csv, index=False)
+    def collect(vol_rows: list[dict]) -> None:
+        rows.extend(vol_rows)
+        for row in vol_rows:
+            print({k: (round(v, 4) if isinstance(v, float) else v) for k, v in row.items()}, flush=True)
+        pd.DataFrame(rows).to_csv(out_csv, index=False)   # rewrite after every volume: a crash keeps partial results
+
+    if args.workers > 1:
+        with ProcessPoolExecutor(args.workers) as pool:
+            for fut in as_completed([pool.submit(process_volume, v, **job) for v in ids]):
+                collect(fut.result())
+    else:
+        for vol_id in ids:
+            collect(process_volume(vol_id, **job))
 
     df = pd.DataFrame(rows)
     print(f"\nSaved {out_csv}\n")

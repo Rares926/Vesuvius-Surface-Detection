@@ -4,7 +4,8 @@ Inference is the only GPU step, so it runs once; every post-processing experimen
 Each model is cached separately, so the ensemble weights can be changed later without re-running inference.
 
 Predictor settings follow the rank-2 final notebook: tile step 0.5, Gaussian weighting, mirroring TTA,
-spacing (1, 1, 1), fold "all", `checkpoint_final.pth`.
+spacing (1, 1, 1), fold "all", `checkpoint_final.pth`. `--fold 0` loads a fold-0 model instead (for comparisons on
+the fold-0 validation volumes).
 
 Rank-2 weights (Kaggle model nguyncdngs/nnunet-resenc, MIT licence, by Duong Nguyen):
   version 3 -> the model the notebook weights 0.6 (the 160^3 model in the write-up)
@@ -27,7 +28,12 @@ from src.common import image_path, pick_ids, prob_path
 
 
 def build_predictor(model_dir: str, device: torch.device, step: float, mirroring: bool, on_device: bool,
-                    checkpoint: str):
+                    checkpoint: str, fold: str = "all"):
+    import os
+    from src.train.nnunet_env import TRAINERS
+    # A model trained with our own trainer (e.g. nnUNetTrainer_FT) stores that class name in its checkpoint, and
+    # nnU-Net rebuilds the network through it, so it must find src/train/trainers/ at prediction time too.
+    os.environ.setdefault("nnUNet_extTrainer", str(TRAINERS))
     from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
 
     predictor = nnUNetPredictor(
@@ -40,7 +46,8 @@ def build_predictor(model_dir: str, device: torch.device, step: float, mirroring
         verbose_preprocessing=False,
         allow_tqdm=False,
     )
-    predictor.initialize_from_trained_model_folder(model_dir, use_folds=("all",), checkpoint_name=checkpoint)
+    use_fold = int(fold) if fold.isdigit() else fold          # nnU-Net names folders fold_0 ... fold_4, fold_all
+    predictor.initialize_from_trained_model_folder(model_dir, use_folds=(use_fold,), checkpoint_name=checkpoint)
     return predictor
 
 
@@ -60,6 +67,7 @@ def main() -> None:
     ap.add_argument("--model", action="append", required=True, metavar="NAME=DIR",
                     help="model name and nnU-Net trained-model folder; repeat for several models")
     ap.add_argument("--checkpoint", default="checkpoint_final.pth")
+    ap.add_argument("--fold", default="all", help="which fold_<x> folder to load: all (rank 2's default) or 0-4")
     ap.add_argument("--ids", nargs="*", help="volume ids; default: --per-scroll volumes from each scroll")
     ap.add_argument("--per-scroll", type=int, default=2)
     ap.add_argument("--split", default="train", choices=["train", "test"])
@@ -78,7 +86,7 @@ def main() -> None:
     for spec in args.model:
         name, model_dir = spec.split("=", 1)
         predictor = build_predictor(model_dir, device, args.step, not args.no_mirroring, args.on_device,
-                                    args.checkpoint)
+                                    args.checkpoint, args.fold)
         for vol_id in ids:
             out = prob_path(name, vol_id)
             if out.exists() and not args.overwrite:
