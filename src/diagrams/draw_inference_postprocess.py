@@ -38,7 +38,7 @@ OUT = Path(sys.argv[1])
 VOL = sys.argv[2] if len(sys.argv) > 2 else "105796630"
 MODEL = sys.argv[3] if len(sys.argv) > 3 else "m128"
 P = Rank2Params()
-PLANS = {"lo": 0.0, "hi": 212.0, "mean": 87.54424285888672, "std": 47.74376678466797}   # models/v2/plans.json
+PLANS = {"lo": 0.0, "hi": 212.0, "mean": 87.54424285888672, "std": 47.74376678466797}   # models/rank_2/v2/nnUNet_ResEnc/plans.json
 PATCH, STEP = 128, 0.5
 
 # ============================================================== real volume: inference pictures and scores
@@ -281,7 +281,7 @@ box("img", 30, 78, 820, 92)
 text(46, 100, "Input", "th")
 text(46, 120, f"CT volume data/train_images/{VOL}.tif: {ct.shape[0]}×{ct.shape[1]}×{ct.shape[2]} voxels (z, y, x), "
      "uint8", "ts")
-text(46, 138, "Model models/v2/nnUNet_ResEnc (128³ patches, fold all), tile step 0.5, Gaussian on, mirroring off", "ts")
+text(46, 138, "Model models/rank_2/v2/nnUNet_ResEnc (128³ patches, fold all), tile step 0.5, Gaussian on, mirroring off", "ts")
 text(46, 156, f"Synthetic volume for Step 2: {toy.shape[0]}×{toy.shape[1]}×{toy.shape[2]} voxels, picture slice "
      f"y = {SLICE_Y} (src/diagrams/synthetic_sheets.py)", "ts")
 

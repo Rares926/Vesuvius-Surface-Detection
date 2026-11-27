@@ -27,7 +27,7 @@ MODEL = sys.argv[3] if len(sys.argv) > 3 else "m128"
 ct = tifffile.imread(image_path(VOL))
 gt = tifffile.imread(label_path(VOL))
 prob = np.load(prob_path(MODEL, VOL)).astype(np.float32)
-PLANS = {"lo": 0.0, "hi": 212.0, "mean": 87.54424285888672, "std": 47.74376678466797}   # models/v2 plans.json
+PLANS = {"lo": 0.0, "hi": 212.0, "mean": 87.54424285888672, "std": 47.74376678466797}   # models/rank_2/v2/nnUNet_ResEnc/plans.json
 PATCH, IMAGE, STEP = 128, 320, 0.5
 
 W = 1400
