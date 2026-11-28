@@ -17,13 +17,14 @@ from __future__ import annotations
 
 import contextlib
 import io
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 from scipy.ndimage import binary_fill_holes
 from skimage import morphology
 
 from . import rank2_reference as ref
+from .optimal_surface import OptSurfaceParams, use_optimal_surface
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,11 @@ class Rank2Params:
     alt_min_dice: float = 0.45
     alt_min_coverage: float = 0.80
     min_component_size: int = 100
+    # how each hole region's height map is computed: "griddata" (rank 2) or "optimal_surface" (a min-cut over the
+    # probability map, see optimal_surface.py)
+    fit: str = "griddata"
+    opt: OptSurfaceParams = field(default_factory=OptSurfaceParams)
+    seed: int = 0                    # for the reference code's random point subsampling (reproducible masks)
     # the reference code prints a lot; silence it by default
     quiet: bool = True
 
@@ -108,8 +114,15 @@ def rank2_postprocess(prob: np.ndarray, p: Rank2Params = Rank2Params()) -> np.nd
     alts = [_crop(a, p.crop) for a in alts]
 
     if p.interpolate:
+        # the reference code subsamples points with an unseeded np.random.choice; fix the seed so every run (and
+        # every variant built on this pipeline) gets the same mask. The method itself is unchanged.
+        np.random.seed(p.seed)
+        if p.fit not in ("griddata", "optimal_surface"):
+            raise ValueError(f"unknown fit {p.fit!r}")
         out = io.StringIO() if p.quiet else None
-        with contextlib.redirect_stdout(out) if out is not None else contextlib.nullcontext():
+        fit_ctx = (use_optimal_surface(_crop(prob, p.crop), base.copy(), p.opt) if p.fit == "optimal_surface"
+                   else contextlib.nullcontext())
+        with contextlib.redirect_stdout(out) if out is not None else contextlib.nullcontext(), fit_ctx:
             base, _, _ = ref.process_multiple_components_patchwise(
                 volume=base,
                 alternative_volumes=alts,

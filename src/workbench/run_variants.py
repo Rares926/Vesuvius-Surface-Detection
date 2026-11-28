@@ -32,6 +32,13 @@ def cached_ids(models: dict[str, float]) -> list[str]:
     return sorted(set.intersection(*sets)) if sets else []
 
 
+def model_tag(models: dict[str, float]) -> str:
+    """Folder name for the masks: the model name, or e.g. m160x0.6+m128x0.4 for an ensemble."""
+    if len(models) == 1:
+        return next(iter(models))
+    return "+".join(f"{m}x{w:g}" for m, w in models.items())
+
+
 def process_volume(vol_id: str, models: dict[str, float], variants: list[str], no_metric: bool,
                    topometrics_src: str | None, save_masks: bool) -> list[dict]:
     """All variants of one volume: one row per variant. Top-level so it can run in a worker process."""
@@ -49,7 +56,7 @@ def process_volume(vol_id: str, models: dict[str, float], variants: list[str], n
         if label is not None:
             row.update(score_volume(mask, label, topometrics_src=topometrics_src))
         if save_masks:
-            path = CACHE / "masks" / name / f"{vol_id}.tif"
+            path = CACHE / "masks" / model_tag(models) / name / f"{vol_id}.tif"
             path.parent.mkdir(parents=True, exist_ok=True)
             tifffile.imwrite(path, mask.astype(np.uint8))
         rows.append(row)
@@ -64,7 +71,7 @@ def main() -> None:
     ap.add_argument("--ids", nargs="*", help="default: every volume cached for all models")
     ap.add_argument("--no-metric", action="store_true", help="only run the variants (timing / saving masks)")
     ap.add_argument("--topometrics-src", help="path to topological-metrics-kaggle/src if not installed")
-    ap.add_argument("--save-masks", action="store_true", help="write masks to data/cache/masks/<variant>/")
+    ap.add_argument("--save-masks", action="store_true", help="write masks to data/cache/masks/<model>/<variant>/<id>.tif")
     ap.add_argument("--out", help="CSV path; default data/cache/results/<timestamp>.csv")
     ap.add_argument("--workers", type=int, default=1,
                     help="volumes processed in parallel (the metric takes ~48 s per volume on one CPU core)")
